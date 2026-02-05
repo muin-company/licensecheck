@@ -1,0 +1,51 @@
+{
+  "name": "@muin-company/licensecheck",
+  "version": "1.0.0",
+  "description": "Scan dependency licenses. Catch copyleft and missing licenses before they catch you.",
+  "main": "dist/checker.js",
+  "types": "dist/checker.d.ts",
+  "bin": {
+    "licensecheck": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepublishOnly": "npm run build && npm test"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/muin-company/licensecheck.git"
+  },
+  "keywords": [
+    "license",
+    "compliance",
+    "copyleft",
+    "gpl",
+    "agpl",
+    "dependencies",
+    "audit",
+    "legal",
+    "ci"
+  ],
+  "author": "MUIN Company",
+  "license": "MIT",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/muin-company/licensecheck/issues"
+  },
+  "homepage": "https://github.com/muin-company/licensecheck#readme",
+  "devDependencies": {
+    "@types/node": "^25.2.1",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
+  },
+  "engines": {
+    "node": ">=16"
+  }
+}
