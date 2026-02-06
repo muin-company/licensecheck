@@ -29,47 +29,107 @@ Or use directly with `npx`:
 npx @muin-company/licensecheck
 ```
 
-## 📖 Usage
+## 📖 Usage & Examples
 
-### Basic Scan
+### Example 1: Quick Pre-Release Check
+
+**Scenario:** You're about to publish an open-source library and want to ensure no copyleft dependencies snuck in.
 
 ```bash
-licensecheck
+$ cd my-library
+$ licensecheck
+
+🔍 Scanning licenses in node_modules...
+
+✅ All clear! No issues found.
+
+📊 License Summary
+─────────────────
+✅ Permissive: 127 (MIT, Apache-2.0, BSD-3-Clause, ISC)
+⚠️  Copyleft:   0
+❓ Unknown:    0
+───────────────────
+Total packages: 127
+
+Exit code: 0
 ```
 
-Output:
+**Result:** Safe to ship! All dependencies are permissively licensed.
 
-```
+---
+
+### Example 2: Catching Copyleft Violations
+
+**Scenario:** Your company policy forbids GPL licenses. A developer accidentally added a GPL dependency.
+
+```bash
+$ licensecheck
+
+🔍 Scanning licenses in node_modules...
+
 ⚠️  COPYLEFT LICENSES (Review Required):
 ─────────────────────────────────────────
-⚠️  some-gpl-package@2.0.0 → GPL-3.0
+⚠️  some-pdf-library@3.1.0 → GPL-3.0
+⚠️  legacy-crypto@1.2.3 → LGPL-2.1
 
 ❓ UNKNOWN/MISSING LICENSES:
 ────────────────────────────
-❓ unlicensed-package@1.0.0 → NONE
+❓ internal-tool@0.1.0 → NONE (private package, no license field)
+
+📊 License Summary
+─────────────────
+✅ Permissive: 89
+⚠️  Copyleft:   2  ← ⚠️ ACTION REQUIRED
+❓ Unknown:    1
+───────────────────
+Total packages: 92
+
+Exit code: 1  ← Fails CI
+```
+
+**Action:** Replace `some-pdf-library` with a permissively licensed alternative, or get legal clearance.
+
+---
+
+### Example 3: Strict CI Pipeline with Deny-List
+
+**Scenario:** Your company prohibits GPL and AGPL licenses. Enforce this in CI/CD.
+
+```bash
+$ licensecheck --deny GPL-3.0 --deny AGPL-3.0 --deny LGPL-3.0
+
+🔍 Scanning licenses in node_modules...
+
+🚫 DENIED LICENSES FOUND:
+─────────────────────────
+🚫 analytics-lib@2.0.0 → AGPL-3.0 (DENIED)
 
 📊 License Summary
 ─────────────────
 ✅ Permissive: 45
-⚠️  Copyleft:   1
-❓ Unknown:    1
+⚠️  Copyleft:   0
+❓ Unknown:    0
+🚫 Denied:     1  ← Build will fail
 ───────────────────
-Total packages: 47
+Total packages: 46
+
+❌ Found 1 denied license(s). Build failed.
+Exit code: 1
 ```
 
-### Deny Specific Licenses
+**CI Output:** Build stops, PR is blocked until the AGPL dependency is removed.
+
+---
+
+### Example 4: JSON Output for Automation
+
+**Scenario:** You're building a dashboard to track license compliance across multiple repos.
 
 ```bash
-licensecheck --deny GPL-3.0 --deny AGPL-3.0
+$ licensecheck --json > licenses.json
 ```
 
-Exit code `1` if denied licenses are found.
-
-### JSON Output
-
-```bash
-licensecheck --json
-```
+**Output (`licenses.json`):**
 
 ```json
 {
@@ -79,33 +139,89 @@ licensecheck --json
       "version": "4.18.2",
       "license": "MIT",
       "category": "permissive"
+    },
+    {
+      "name": "chalk",
+      "version": "5.3.0",
+      "license": "MIT",
+      "category": "permissive"
+    },
+    {
+      "name": "gpl-lib",
+      "version": "1.0.0",
+      "license": "GPL-3.0",
+      "category": "copyleft"
     }
   ],
   "summary": {
-    "permissive": 45,
-    "copyleft": 0,
+    "permissive": 87,
+    "copyleft": 1,
     "unknown": 0,
     "denied": 0
   },
-  "hasIssues": false
+  "hasIssues": true
 }
 ```
 
-### Summary Only
+**Use case:** Parse JSON, send to compliance dashboard, alert legal team if `hasIssues: true`.
+
+---
+
+### Example 5: Summary-Only Mode for Quick Checks
+
+**Scenario:** You just want a high-level overview without package details.
 
 ```bash
-licensecheck --summary
-```
+$ licensecheck --summary
 
-```
 📊 License Summary
 ─────────────────
-✅ Permissive: 45
+✅ Permissive: 143 (MIT, Apache-2.0, BSD, ISC)
 ⚠️  Copyleft:   0
-❓ Unknown:    0
+❓ Unknown:    2
 ───────────────────
-Total packages: 45
+Total packages: 145
+
+⚠️ 2 packages have unknown licenses. Run without --summary to see details.
+Exit code: 1
 ```
+
+**Tip:** Great for CI notifications — shows just the stats without cluttering logs.
+
+---
+
+### Example 6: Handling Edge Cases - Private Packages & Monorepos
+
+**Scenario:** Your monorepo has internal packages without license fields.
+
+```bash
+$ licensecheck
+
+🔍 Scanning licenses in node_modules...
+
+❓ UNKNOWN/MISSING LICENSES:
+────────────────────────────
+❓ @mycompany/internal-utils@1.0.0 → NONE (private, missing license field)
+❓ @mycompany/shared-config@2.1.0 → NONE (private, missing license field)
+❓ random-npm-package@0.0.1 → UNLICENSED
+
+📊 License Summary
+─────────────────
+✅ Permissive: 92
+⚠️  Copyleft:   0
+❓ Unknown:    3  ← Internal packages flagged
+───────────────────
+Total packages: 95
+
+💡 TIP: Private packages don't need public licenses, but consider adding
+        "license": "UNLICENSED" to package.json to clarify intent.
+
+Exit code: 1
+```
+
+**Action:**
+- Internal packages: Add `"license": "UNLICENSED"` or `"private": true` in `package.json`
+- External packages: Investigate before using
 
 ## 🔧 CLI Options
 
