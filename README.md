@@ -1518,6 +1518,931 @@ MIT © MUIN Company
 
 ---
 
+## 🚨 Troubleshooting
+
+### Issue: "No package.json found"
+
+**Error:**
+```
+❌ Error: No package.json found in current directory
+```
+
+**Cause:** Running `licensecheck` outside a Node.js project directory.
+
+**Solution:**
+```bash
+# Navigate to your project root
+cd /path/to/your/project
+
+# Verify package.json exists
+ls -la package.json
+
+# Run licensecheck
+licensecheck
+```
+
+---
+
+### Issue: "node_modules not found"
+
+**Error:**
+```
+❌ Error: node_modules directory not found. Run 'npm install' first.
+```
+
+**Cause:** Dependencies haven't been installed yet.
+
+**Solution:**
+```bash
+# Install dependencies
+npm install
+
+# Or with yarn
+yarn install
+
+# Or with pnpm
+pnpm install
+
+# Then run licensecheck
+licensecheck
+```
+
+---
+
+### Issue: False Positives on Internal Packages
+
+**Problem:** Private monorepo packages flagged as "unknown license".
+
+**Example:**
+```
+❓ @mycompany/shared-utils@1.0.0 → NONE (private, missing license field)
+```
+
+**Solutions:**
+
+**Option 1:** Add `"license": "UNLICENSED"` to private packages:
+```json
+{
+  "name": "@mycompany/shared-utils",
+  "version": "1.0.0",
+  "private": true,
+  "license": "UNLICENSED"
+}
+```
+
+**Option 2:** Add `"private": true` (automatically treated as UNLICENSED):
+```json
+{
+  "name": "@mycompany/shared-utils",
+  "version": "1.0.0",
+  "private": true
+}
+```
+
+**Option 3:** Use your internal license:
+```json
+{
+  "name": "@mycompany/shared-utils",
+  "version": "1.0.0",
+  "license": "SEE LICENSE IN LICENSE.txt"
+}
+```
+
+---
+
+### Issue: CI Fails on Transitive Dependencies
+
+**Problem:** A package you depend on has a dependency with GPL license.
+
+**Example:**
+```
+Project → some-tool@1.0.0 (MIT) → pdf-parser@2.0.0 (GPL-3.0)
+```
+
+**Solutions:**
+
+**Option 1:** Find alternative package
+```bash
+# Search for alternatives
+npm search "pdf parser" --filter "license:MIT"
+
+# Check alternatives' licenses
+npx @muin-company/licensecheck --json | jq '.packages[] | select(.name | contains("pdf"))'
+```
+
+**Option 2:** Contact package maintainer
+```bash
+# Check if newer version fixes it
+npm view some-tool versions
+npm install some-tool@latest
+
+# Or open an issue
+# "Hey, pdf-parser dependency uses GPL-3.0, consider switching to a permissive alternative"
+```
+
+**Option 3:** Fork and patch (last resort)
+```bash
+# Use patch-package to remove problematic dependency
+npm install patch-package
+# ... make changes ...
+npx patch-package some-tool
+```
+
+---
+
+### Issue: SPDX License Expression Not Recognized
+
+**Problem:** Package uses SPDX expression like `(MIT OR Apache-2.0)`.
+
+**Example:**
+```
+❓ flexible-lib@1.0.0 → (MIT OR Apache-2.0)
+```
+
+**Solution:** This is actually fine! Dual-licensed packages give you a choice.
+
+**Explanation:**
+- `(MIT OR Apache-2.0)` = You can use under **either** license
+- `(MIT AND Apache-2.0)` = You must comply with **both** licenses
+- Current version flags these as "unknown" for safety
+
+**Workaround:** Manually verify in CI script:
+```bash
+#!/bin/bash
+licensecheck --json > report.json
+
+# Check if "unknown" licenses are actually dual-licensed
+unknown=$(jq -r '.packages[] | select(.category == "unknown") | "\(.name): \(.license)"' report.json)
+
+if echo "$unknown" | grep -q "OR MIT\|MIT OR"; then
+  echo "✅ Dual-licensed packages are OK (MIT is an option)"
+else
+  echo "⚠️ Truly unknown licenses found"
+  exit 1
+fi
+```
+
+---
+
+### Issue: Performance on Large Monorepos
+
+**Problem:** Scanning 10,000+ packages takes too long.
+
+**Solution 1:** Cache results in CI
+```yaml
+# .github/workflows/license-check.yml
+- name: Cache license report
+  uses: actions/cache@v3
+  with:
+    path: .license-cache
+    key: licenses-${{ hashFiles('package-lock.json') }}
+
+- name: Check licenses
+  run: |
+    if [ -f .license-cache/report.json ]; then
+      echo "Using cached report"
+      cp .license-cache/report.json report.json
+    else
+      licensecheck --json > report.json
+      mkdir -p .license-cache
+      cp report.json .license-cache/
+    fi
+```
+
+**Solution 2:** Scan only production dependencies
+```bash
+# Temporarily remove devDependencies from node_modules
+npm prune --production
+
+# Scan
+licensecheck
+
+# Restore
+npm install
+```
+
+**Solution 3:** Parallelize in monorepos
+```bash
+# scripts/parallel-license-check.sh
+#!/bin/bash
+
+packages=$(find packages -name package.json -not -path "*/node_modules/*")
+
+for pkg in $packages; do
+  dir=$(dirname "$pkg")
+  (cd "$dir" && licensecheck --json > licenses.json) &
+done
+
+wait
+echo "✅ All packages scanned"
+```
+
+---
+
+### Issue: Different Results on Different Machines
+
+**Cause:** Different `node_modules` contents due to lock file drift.
+
+**Solution:**
+```bash
+# Delete and reinstall with lock file
+rm -rf node_modules
+npm ci  # Uses package-lock.json exactly
+
+# Or with yarn
+rm -rf node_modules
+yarn install --frozen-lockfile
+
+# Then check
+licensecheck
+```
+
+---
+
+### Issue: License in README but Not package.json
+
+**Problem:** Package has license in README/LICENSE file, but not in `package.json`.
+
+**Example:**
+```
+❓ old-package@1.0.0 → NONE (missing license field, but has LICENSE file)
+```
+
+**Explanation:** `licensecheck` reads `package.json` only (for performance).
+
+**Solutions:**
+
+**Option 1:** Manually verify
+```bash
+# Check LICENSE file in node_modules
+cat node_modules/old-package/LICENSE
+```
+
+**Option 2:** Contribute to package
+```bash
+# Open PR to add license field to package.json
+{
+  "name": "old-package",
+  "license": "MIT"  # ← Add this
+}
+```
+
+**Option 3:** Document exception
+```bash
+# Create .licensecheck-exceptions.json
+{
+  "exceptions": [
+    {
+      "package": "old-package",
+      "reason": "MIT licensed (verified in LICENSE file)",
+      "approvedBy": "legal@company.com",
+      "approvedDate": "2024-01-15"
+    }
+  ]
+}
+```
+
+---
+
+### Issue: NPM Registry vs Git Dependencies
+
+**Problem:** Git dependencies don't have license info in `package.json`.
+
+**Example:**
+```json
+{
+  "dependencies": {
+    "custom-lib": "git+https://github.com/company/custom-lib.git#v1.0.0"
+  }
+}
+```
+
+**Result:**
+```
+❓ custom-lib@1.0.0 → NONE (git dependency)
+```
+
+**Solution:** Clone and check manually, or switch to npm registry:
+```bash
+# Publish to private npm registry
+npm publish --registry https://npm.company.com
+
+# Or use local file path
+{
+  "dependencies": {
+    "custom-lib": "file:../custom-lib"
+  }
+}
+```
+
+---
+
+## 🎓 Advanced Usage
+
+### Programmatic API
+
+Use `licensecheck` as a library in your own tools:
+
+```typescript
+import { scanLicenses, categorizeLicense } from '@muin-company/licensecheck';
+
+// Scan current project
+const result = await scanLicenses(process.cwd());
+
+console.log(`Total packages: ${result.packages.length}`);
+console.log(`Copyleft: ${result.summary.copyleft}`);
+console.log(`Unknown: ${result.summary.unknown}`);
+
+// Check specific package
+const express = result.packages.find(p => p.name === 'express');
+console.log(`Express license: ${express?.license}`);
+
+// Categorize a license string
+const category = categorizeLicense('GPL-3.0');
+console.log(category); // 'copyleft'
+```
+
+**Full API Example:**
+
+```typescript
+import { scanLicenses, LicenseReport, LicenseCategory } from '@muin-company/licensecheck';
+
+interface LicenseReport {
+  packages: Array<{
+    name: string;
+    version: string;
+    license: string | null;
+    category: LicenseCategory;
+  }>;
+  summary: {
+    permissive: number;
+    copyleft: number;
+    unknown: number;
+    denied: number;
+  };
+  hasIssues: boolean;
+}
+
+async function customCheck() {
+  const report = await scanLicenses('/path/to/project', {
+    deny: ['GPL-3.0', 'AGPL-3.0'],
+    includeDevDependencies: false
+  });
+
+  // Filter high-risk packages
+  const risks = report.packages.filter(p => 
+    p.category === 'copyleft' || p.category === 'unknown'
+  );
+
+  if (risks.length > 0) {
+    console.error('⚠️ High-risk licenses found:');
+    risks.forEach(pkg => {
+      console.error(`  - ${pkg.name}@${pkg.version}: ${pkg.license}`);
+    });
+    process.exit(1);
+  }
+}
+
+customCheck();
+```
+
+---
+
+### Custom Reporters
+
+Build your own output formats:
+
+```typescript
+// reporters/markdown-reporter.ts
+import { LicenseReport } from '@muin-company/licensecheck';
+import * as fs from 'fs';
+
+export function generateMarkdownReport(report: LicenseReport): string {
+  let md = '# License Report\n\n';
+  
+  md += `**Generated:** ${new Date().toISOString()}\n\n`;
+  
+  md += '## Summary\n\n';
+  md += `- Total Packages: ${report.packages.length}\n`;
+  md += `- Permissive: ${report.summary.permissive}\n`;
+  md += `- Copyleft: ${report.summary.copyleft}\n`;
+  md += `- Unknown: ${report.summary.unknown}\n\n`;
+  
+  // Group by license
+  const grouped = new Map<string, typeof report.packages>();
+  for (const pkg of report.packages) {
+    const license = pkg.license || 'UNKNOWN';
+    if (!grouped.has(license)) grouped.set(license, []);
+    grouped.get(license)!.push(pkg);
+  }
+  
+  md += '## License Breakdown\n\n';
+  for (const [license, packages] of grouped) {
+    md += `### ${license} (${packages.length})\n\n`;
+    packages.forEach(p => {
+      md += `- ${p.name}@${p.version}\n`;
+    });
+    md += '\n';
+  }
+  
+  return md;
+}
+
+// Usage
+import { scanLicenses } from '@muin-company/licensecheck';
+
+const report = await scanLicenses(process.cwd());
+const markdown = generateMarkdownReport(report);
+fs.writeFileSync('LICENSE-REPORT.md', markdown);
+```
+
+---
+
+### Integration with Other Tools
+
+#### Combine with `npm-check-updates`
+
+```bash
+#!/bin/bash
+# scripts/safe-update.sh
+
+echo "🔍 Checking for updates..."
+ncu -u --target minor
+
+echo "📦 Installing updates..."
+npm install
+
+echo "🔒 Checking licenses..."
+if licensecheck --deny GPL-3.0 --deny AGPL-3.0; then
+  echo "✅ Updates are license-safe"
+  git add package.json package-lock.json
+  git commit -m "chore: safe dependency updates"
+else
+  echo "❌ Updates introduce problematic licenses"
+  git checkout package.json package-lock.json
+  npm install
+  exit 1
+fi
+```
+
+#### Combine with `depcheck`
+
+```bash
+# Check unused dependencies AND licenses
+depcheck && licensecheck
+```
+
+#### Combine with `snyk`
+
+```bash
+# Security + License compliance
+snyk test && licensecheck --deny GPL-3.0
+```
+
+---
+
+### Custom License Policies
+
+Create reusable policy files:
+
+```bash
+# policies/open-source.policy
+# Open Source Project License Policy
+# Permissive licenses only
+
+--deny GPL-2.0
+--deny GPL-3.0
+--deny AGPL-3.0
+--deny LGPL-2.0
+--deny LGPL-2.1
+--deny LGPL-3.0
+```
+
+```bash
+# policies/commercial.policy
+# Commercial Product License Policy
+# Ultra-strict - no copyleft at all
+
+--deny GPL-2.0
+--deny GPL-3.0
+--deny AGPL-3.0
+--deny LGPL-2.0
+--deny LGPL-2.1
+--deny LGPL-3.0
+--deny MPL-1.1
+--deny MPL-2.0
+--deny EPL-1.0
+--deny EPL-2.0
+--deny OSL-3.0
+--deny CDDL-1.0
+```
+
+**Usage:**
+```bash
+# Apply policy
+licensecheck $(cat policies/commercial.policy)
+
+# Or via npm script
+{
+  "scripts": {
+    "check:oss": "licensecheck $(cat policies/open-source.policy)",
+    "check:commercial": "licensecheck $(cat policies/commercial.policy)"
+  }
+}
+```
+
+---
+
+### Continuous Monitoring
+
+Set up automated daily checks:
+
+```yaml
+# .github/workflows/license-monitor.yml
+name: Daily License Monitor
+
+on:
+  schedule:
+    - cron: '0 9 * * *'  # 9 AM daily
+  workflow_dispatch:  # Manual trigger
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Check licenses
+        id: check
+        run: |
+          npm ci
+          licensecheck --json > current-licenses.json
+          
+      - name: Compare with baseline
+        run: |
+          # Download previous report
+          gh run download --name license-baseline -D baseline || echo "No baseline"
+          
+          # Compare
+          if [ -f baseline/licenses.json ]; then
+            node scripts/compare-licenses.js baseline/licenses.json current-licenses.json
+          else
+            echo "First run - creating baseline"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Upload current as baseline
+        uses: actions/upload-artifact@v3
+        with:
+          name: license-baseline
+          path: current-licenses.json
+          retention-days: 30
+      
+      - name: Notify on changes
+        if: steps.check.outputs.changed == 'true'
+        uses: slackapi/slack-github-action@v1
+        with:
+          payload: |
+            {
+              "text": "📊 License changes detected in ${{ github.repository }}"
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}
+```
+
+---
+
+### Multi-Language Projects
+
+Handle projects with mixed ecosystems:
+
+```bash
+#!/bin/bash
+# scripts/check-all-licenses.sh
+
+echo "🔍 Multi-Language License Audit"
+echo "==============================="
+
+# Node.js
+if [ -f package.json ]; then
+  echo ""
+  echo "📦 Node.js dependencies:"
+  npx @muin-company/licensecheck --summary
+fi
+
+# Python
+if [ -f requirements.txt ]; then
+  echo ""
+  echo "🐍 Python dependencies:"
+  pip-licenses --summary
+fi
+
+# Go
+if [ -f go.mod ]; then
+  echo ""
+  echo "🐹 Go dependencies:"
+  go-licenses csv . 2>/dev/null | tail -n +2 | cut -d',' -f3 | sort | uniq -c
+fi
+
+# Ruby
+if [ -f Gemfile ]; then
+  echo ""
+  echo "💎 Ruby dependencies:"
+  bundle exec license_finder --summary
+fi
+
+echo ""
+echo "✅ Multi-language audit complete"
+```
+
+---
+
+### Generate SBOM (Software Bill of Materials)
+
+Create CycloneDX or SPDX-compliant reports:
+
+```typescript
+// scripts/generate-sbom.ts
+import { scanLicenses } from '@muin-company/licensecheck';
+import * as fs from 'fs';
+
+async function generateSBOM() {
+  const report = await scanLicenses(process.cwd());
+  
+  // CycloneDX format
+  const sbom = {
+    bomFormat: 'CycloneDX',
+    specVersion: '1.4',
+    version: 1,
+    metadata: {
+      timestamp: new Date().toISOString(),
+      tools: [{
+        name: '@muin-company/licensecheck',
+        version: '1.0.0'
+      }]
+    },
+    components: report.packages.map(pkg => ({
+      type: 'library',
+      name: pkg.name,
+      version: pkg.version,
+      licenses: pkg.license ? [{ license: { id: pkg.license } }] : [],
+      purl: `pkg:npm/${pkg.name}@${pkg.version}`
+    }))
+  };
+  
+  fs.writeFileSync('sbom.json', JSON.stringify(sbom, null, 2));
+  console.log('✅ Generated sbom.json (CycloneDX format)');
+}
+
+generateSBOM();
+```
+
+```json
+{
+  "scripts": {
+    "sbom": "ts-node scripts/generate-sbom.ts"
+  }
+}
+```
+
+---
+
+### License Compatibility Matrix
+
+Check if your project's license is compatible with dependencies:
+
+```typescript
+// scripts/check-compatibility.ts
+const compatibilityMatrix = {
+  'MIT': {
+    'MIT': true,
+    'Apache-2.0': true,
+    'BSD-3-Clause': true,
+    'GPL-3.0': false,  // MIT code can't use GPL deps if distributing
+    'AGPL-3.0': false
+  },
+  'Apache-2.0': {
+    'MIT': true,
+    'Apache-2.0': true,
+    'GPL-3.0': false,
+    'LGPL-3.0': true  // With care
+  },
+  'GPL-3.0': {
+    'MIT': true,
+    'Apache-2.0': true,
+    'GPL-3.0': true,
+    'GPL-2.0': false  // Incompatible!
+  }
+};
+
+import { scanLicenses } from '@muin-company/licensecheck';
+
+async function checkCompatibility() {
+  const projectLicense = 'MIT';  // Your project's license
+  const report = await scanLicenses(process.cwd());
+  
+  const incompatible = report.packages.filter(pkg => {
+    if (!pkg.license) return false;
+    return compatibilityMatrix[projectLicense]?.[pkg.license] === false;
+  });
+  
+  if (incompatible.length > 0) {
+    console.error(`❌ Incompatible licenses for ${projectLicense} project:`);
+    incompatible.forEach(pkg => {
+      console.error(`  - ${pkg.name}: ${pkg.license}`);
+    });
+    process.exit(1);
+  }
+  
+  console.log(`✅ All dependencies compatible with ${projectLicense}`);
+}
+
+checkCompatibility();
+```
+
+---
+
+## ❓ FAQ
+
+### Q: What's the difference between "copyleft" and "permissive"?
+
+**Permissive licenses** (MIT, Apache, BSD):
+- ✅ Use freely in commercial products
+- ✅ Modify and redistribute
+- ✅ No requirement to open-source your code
+- ⚠️ Must include license notice
+
+**Copyleft licenses** (GPL, AGPL):
+- ✅ Use freely in open-source projects
+- ⚠️ Modifications must be open-sourced under same license
+- ❌ Can't include in proprietary software (usually)
+- ⚠️ "Viral" - affects your entire codebase
+
+### Q: Is LGPL safe for commercial use?
+
+**It depends:**
+- ✅ **Dynamically linking** (e.g., using as npm dependency): Usually OK
+- ❌ **Statically linking** (e.g., bundling): Must open-source your code
+- ⚠️ **Best practice**: Avoid LGPL in commercial products unless legal review
+
+### Q: Can I use GPL dependencies if my code is also GPL?
+
+**Yes!** GPL dependencies are fine if:
+1. Your project is also GPL-licensed
+2. You're not distributing proprietary software
+3. All derivative works will be open-source
+
+### Q: What if a package has no license?
+
+**Legally:**
+- ❌ **No license = All rights reserved** (can't legally use it)
+- ⚠️ **Reality**: Many authors just forgot to add license field
+
+**Action:**
+1. Open GitHub issue: "Please add license field to package.json"
+2. Check if LICENSE file exists in repo
+3. Contact author
+4. Find alternative package
+
+### Q: Are "dual-licensed" packages safe?
+
+**Yes!** Dual licensing (e.g., `MIT OR Apache-2.0`) lets you choose:
+- Pick the license that works for you
+- Example: `(MIT OR GPL-3.0)` → Choose MIT for commercial use
+
+### Q: Does this check my code's license?
+
+**No.** `licensecheck` only scans **dependencies** in `node_modules`.
+
+To check your own code's license headers:
+```bash
+# Use a different tool
+npx license-checker-rseidelsohn --onlyAllow "MIT;Apache-2.0"
+```
+
+### Q: What about dev dependencies?
+
+**Current behavior:** Scans all dependencies (including dev).
+
+**Why:** Dev tools can have licensing implications (e.g., AGPL build tool).
+
+**To skip dev deps:**
+```bash
+npm prune --production
+licensecheck
+npm install  # Restore dev deps
+```
+
+### Q: Can I whitelist licenses instead of denying?
+
+**Not directly**, but you can script it:
+
+```bash
+#!/bin/bash
+allowed="MIT,Apache-2.0,BSD-2-Clause,BSD-3-Clause,ISC,0BSD"
+
+licensecheck --json > report.json
+
+not_allowed=$(jq -r --arg allowed "$allowed" '
+  .packages[] | 
+  select(.license != null and ($allowed | split(",") | index(.license) | not)) | 
+  "\(.name): \(.license)"
+' report.json)
+
+if [ -n "$not_allowed" ]; then
+  echo "❌ Non-whitelisted licenses found:"
+  echo "$not_allowed"
+  exit 1
+fi
+```
+
+### Q: Does this work with Yarn/PNPM?
+
+**Yes!** As long as `node_modules` is populated:
+```bash
+# Yarn
+yarn install
+licensecheck
+
+# PNPM
+pnpm install
+licensecheck
+```
+
+### Q: Can I exclude specific packages?
+
+**Not yet**, but coming soon! For now:
+
+```bash
+# Workaround: post-process JSON
+licensecheck --json | jq 'del(.packages[] | select(.name == "package-to-ignore"))'
+```
+
+### Q: How do I handle corporate proxies?
+
+`licensecheck` reads local `node_modules` only - **no network calls**.
+
+If npm install fails behind proxy:
+```bash
+npm config set proxy http://proxy.company.com:8080
+npm config set https-proxy http://proxy.company.com:8080
+npm install
+licensecheck  # Works offline
+```
+
+---
+
+## 📚 Further Reading
+
+### License Guides
+- [Choose a License](https://choosealicense.com/) - Explains common licenses
+- [SPDX License List](https://spdx.org/licenses/) - Official license identifiers
+- [TLDRLegal](https://tldrlegal.com/) - Plain English license summaries
+
+### Compliance Tools
+- [FOSSA](https://fossa.com/) - Enterprise license compliance
+- [Black Duck](https://www.blackducksoftware.com/) - Commercial solution
+- [FOSSology](https://www.fossology.org/) - Open source compliance tool
+
+### Legal Resources
+- [Open Source Initiative](https://opensource.org/) - License approval body
+- [Software Freedom Law Center](https://softwarefreedom.org/)
+- [GNU License Compatibility](https://www.gnu.org/licenses/license-compatibility.en.html)
+
+---
+
+## 🔄 Comparison with Alternatives
+
+| Tool | Scope | Output | Speed | Dependencies |
+|------|-------|--------|-------|--------------|
+| **licensecheck** | npm only | CLI + JSON | Fast | Zero |
+| license-checker | npm only | JSON + CSV | Medium | Many |
+| license-checker-rseidelsohn | npm + Bower | JSON + CSV + Markdown | Medium | Many |
+| FOSSA CLI | Multi-lang | API + Web UI | Slow | Binary |
+| license-compliance | npm only | CLI | Fast | Few |
+
+**Why licensecheck?**
+- ✅ Zero dependencies (safe to add anywhere)
+- ✅ Fast (optimized for CI)
+- ✅ Focused (does one thing well)
+- ✅ Modern (TypeScript, actively maintained)
+
+---
+
+## 🛣️ Roadmap
+
+- [ ] Whitelist mode (`--allow MIT --allow Apache-2.0`)
+- [ ] Exclude packages (`--exclude test-package`)
+- [ ] Confidence scoring (package.json vs LICENSE file)
+- [ ] SPDX expression parsing (`(MIT OR Apache-2.0)`)
+- [ ] License text extraction
+- [ ] Multi-language support (Python, Go, Ruby)
+- [ ] GitHub Action
+- [ ] VS Code extension
+
+---
+
 **Made with ❤️ by [MUIN Company](https://github.com/muin-company)**
 
 *Part of the MUIN micro-tools ecosystem — small, focused, powerful.*
